@@ -167,12 +167,25 @@ function Set-TargetResource
                                               -ScriptBlock {
                     $params = $args[0]
 
-                    $runParams = @{}
-                    $runParams.Add("Identity", $params.Name)
-                    $runParams.Add("Confirm", $false)
-                    $runParams.Add("Verbose", $false)
+                    <#
+                        #James O'Leary Nov 23, 2018 Remove-SPSolution will not work with the $runParams hash table
+                        
+                        #$runParams = @{}
+                        #$runParams.Add("Identity", $params.Name)
+                        #$runParams.Add("Confirm", $false)
+                        #$runParams.Add("Verbose", $false)
 
-                    Remove-SPSolution $runParams
+                        #Remove-SPSolution $($runParams)
+                    
+                        PowerShell DSC resource MSFT_SPFarmSolution  failed to execute Set-TargetResource functionality with 
+                        error message: Cannot bind parameter 'Identity'. Cannot convert the "System.Collections.Hashtable" value 
+                        of type "System.Collections.Hashtable" to type "Microsoft.SharePoint.PowerShell.SPSolutionPipeBind". 
+                        + CategoryInfo          : InvalidOperation: (:) [], CimException
+                        + FullyQualifiedErrorId : ProviderOperationExecutionFailure
+                    #>
+                    #James Nov 23, 2018 Get solution by name and then remove
+                    $solution = Get-SPSolution $params.Name 
+                    Remove-SPSolution $solution -Confirm:$false -Verbose:$false
 
                     $runParams = @{}
                     $runParams.Add("LiteralPath", $params.LiteralPath)
@@ -203,6 +216,10 @@ function Set-TargetResource
                     $runParams.Add("Identity", $params.Name)
                     $runParams.Add("LiteralPath", $params.LiteralPath)
                     $runParams.Add("GACDeployment", $solution.ContainsGlobalAssembly)
+                    
+                    #James O'Leary  Nov 23, 2018 Add Full Trust Bin Deployment
+                    $runParams.Add("FullTrustBinDeployment", $(!$solution.ContainsGlobalAssembly -and $solution.ContainsWebApplicationResource))
+                    
                     $runParams.Add("Confirm", $false)
                     $runParams.Add("Local", $false)
                     $runParams.Add("Verbose", $false)
@@ -225,6 +242,9 @@ function Set-TargetResource
         #If ensure is absent we should also retract the solution first
         $Deployed = $false
     }
+    
+    #James O'Leary If (Change version) and (Deployed --> Not Deployed) then wait for change version to finish
+    Wait-SPDSCSolutionJob -SolutionName $Name -InstallAccount $InstallAccount
 
     if ($Deployed -ne $CurrentValues.Deployed)
     {
@@ -242,9 +262,16 @@ function Set-TargetResource
                 $runParams.Add("Identity", $params.Name)
                 $runParams.Add("Confirm", $false)
                 $runParams.Add("Verbose", $false)
+                
+                #James Nov 24, 2018 Get the solution
+                $solution = Get-SPSolution -Identity $($params.Name) -Verbose:$false
 
                 if ($solution.ContainsWebApplicationResource)
                 {
+                    #James O'Leary Nov 23, 2018 Get Web Apps for each WebAppUrls
+                    $webApps=New-Object System.Collections.ArrayList
+                    $webApps+=$($params.WebAppUrls).foreach({(Get-SPWebApplication -Identity $_ -ErrorAction SilentlyContinue)})
+                    
                     if ($null -eq $webApps -or $webApps.Length -eq 0)
                     {
                         $runParams.Add("AllWebApplications", $true)
@@ -280,6 +307,10 @@ function Set-TargetResource
                 $runParams = @{
                     Identity = $solution
                     GACDeployment = $solution.ContainsGlobalAssembly
+                    
+                    #James O'Leary  Nov 23, 2018 Add Full Trust Bin Deployment
+                    FullTrustBinDeployment=$(!$solution.ContainsGlobalAssembly -and $solution.ContainsWebApplicationResource)
+                    
                     Local = $false
                     Verbose = $false
                 }
@@ -294,6 +325,10 @@ function Set-TargetResource
                 }
                 else
                 {
+                    #James O'Leary Nov 23, 2018 Get Web Apps for each WebAppUrls
+                    $webApps=New-Object System.Collections.ArrayList
+                    $webApps+=$($params.WebAppUrls).foreach({(Get-SPWebApplication -Identity $_ -ErrorAction SilentlyContinue)})
+                    
                     if ($null -eq $webApps -or $webApps.Length -eq 0)
                     {
                         $runParams.Add("AllWebApplications", $true)
